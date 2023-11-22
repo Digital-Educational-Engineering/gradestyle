@@ -88,7 +88,14 @@ public enum Type {
 
   StringConcatenation,
 
-  Clones;
+  Clones,
+
+  JavaFX_Controller,
+  JavaFX_FieldAnnotation,
+  JavaFX_Initializer,
+  JavaFX_EventHandlerName,
+  JavaFX_EventHandlerAnnotation,
+  JavaFX_EventHandlerPrivate;
 
   public Category getCategory() {
     return Category.valueOf(name().split("_")[0]);
@@ -259,6 +266,19 @@ public enum Type {
 
       case Clones:
         return "This code is cloned.";
+
+      case JavaFX_Controller:
+        return "This controller class does not match the naming convention.";
+      case JavaFX_FieldAnnotation:
+        return "This field is not annotated correctly.";
+      case JavaFX_Initializer:
+        return "This field should be initialized by JavaFX.";
+      case JavaFX_EventHandlerName:
+        return "This event handler name does not match the naming convention.";
+      case JavaFX_EventHandlerAnnotation:
+        return "This event handler is not annotated correctly.";
+      case JavaFX_EventHandlerPrivate:
+        return "This event handler should have a different access modifier.";
 
       default:
         throw new IllegalArgumentException("Unknown type: " + this);

@@ -38,7 +38,8 @@ public enum Category {
   Ordering,
   Useless,
   StringConcatenation,
-  Clones;
+  Clones,
+  JavaFX;
 
   public static Map<Category, Integer> getCategoryScores(
       ValidationResult result, List<CategoryConfig> configs) throws IOException {
@@ -97,6 +98,10 @@ public enum Category {
   }
 
   private long getNormalisation(Repo repo) throws IOException {
+    if (this == JavaFX) {
+      return FileUtils.getFxmlFiles(repo.getDir()).count();
+    }
+
     long normalisation = 0;
 
     for (Path file : FileUtils.getJavaSrcFiles(repo.getDir()).toList()) {
