@@ -1,9 +1,15 @@
 # GradeStyle
 
+## Build
+
+```bash
+> ./gradlew build
+```
+
 ## Run
 
 ```bash
-> ./gradlew run --args="<properties-file>"
+> java -jar build/libs/GradeStyle-all.jar <properties-file>
 ```
 
 ## Configuration
