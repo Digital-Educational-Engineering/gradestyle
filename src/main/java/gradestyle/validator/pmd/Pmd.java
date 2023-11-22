@@ -97,6 +97,8 @@ public class Pmd implements Validator {
         return Type.VariableNames_FinalStaticUppercase;
       case "StringConcatenation":
         return Type.StringConcatenation;
+      case "EarlyReturn":
+        return Type.EarlyReturn;
       default:
         throw new IllegalArgumentException("Unknown rule: " + rule.getName());
     }

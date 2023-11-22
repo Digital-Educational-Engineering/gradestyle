@@ -12,6 +12,7 @@ import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.comments.Comment;
+import com.github.javaparser.ast.stmt.IfStmt;
 import gradestyle.Repo;
 import gradestyle.config.CategoryConfig;
 import gradestyle.util.FileUtils;
@@ -39,7 +40,8 @@ public enum Category {
   Useless,
   StringConcatenation,
   Clones,
-  JavaFX;
+  JavaFX,
+  EarlyReturn;
 
   public static Map<Category, Integer> getCategoryScores(
       ValidationResult result, List<CategoryConfig> configs) throws IOException {
@@ -150,6 +152,9 @@ public enum Category {
                   .mapToInt(Range::getLineCount)
                   .sum();
           break;
+        case EarlyReturn:
+          normalisation += ifStatementCounter(cu);
+          break;
         default:
           throw new IllegalArgumentException("Unknown category: " + this);
       }
@@ -185,6 +190,10 @@ public enum Category {
 
   private int constructorCounter(CompilationUnit cu) {
     return cu.findAll(ConstructorDeclaration.class).size();
+  }
+
+  private int ifStatementCounter(CompilationUnit cu) {
+    return cu.findAll(IfStmt.class).size();
   }
 
   public List<Type> getTypes() {

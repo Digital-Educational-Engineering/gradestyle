@@ -95,7 +95,9 @@ public enum Type {
   JavaFX_Initializer,
   JavaFX_EventHandlerName,
   JavaFX_EventHandlerAnnotation,
-  JavaFX_EventHandlerPrivate;
+  JavaFX_EventHandlerPrivate,
+
+  EarlyReturn;
 
   public Category getCategory() {
     return Category.valueOf(name().split("_")[0]);
@@ -279,6 +281,9 @@ public enum Type {
         return "This event handler is not annotated correctly.";
       case JavaFX_EventHandlerPrivate:
         return "This event handler should have a different access modifier.";
+
+      case EarlyReturn:
+        return "This conditional could have been an early return.";
 
       default:
         throw new IllegalArgumentException("Unknown type: " + this);

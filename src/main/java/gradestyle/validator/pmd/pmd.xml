@@ -35,4 +35,5 @@
   </rule>
 
   <rule name="StringConcatenation" language="java" class="gradestyle.validator.pmd.StringConcatenation"/>
+  <rule name="EarlyReturn" language="java" class="gradestyle.validator.pmd.EarlyReturn"/>
 </ruleset>

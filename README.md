@@ -71,7 +71,8 @@ github.feedback=true
 # Style category configuration.
 # Valid <category>: Formatting, ClassNames, MethodNames, VariableNames,
 #                   PackageNames, Commenting, JavaDoc, PrivateMembers,
-#                   Ordering, Useless, StringConcatenation, Clones, JavaFX.
+#                   Ordering, Useless, StringConcatenation, Clones, JavaFX,
+#                   EarlyReturn.
 
 # If scoring for <category> is enabled.
 # Required: No, Default: false.
