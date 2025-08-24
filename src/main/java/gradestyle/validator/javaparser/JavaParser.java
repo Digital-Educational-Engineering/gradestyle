@@ -1,30 +1,52 @@
 package gradestyle.validator.javaparser;
 
 import com.github.javaparser.ParseResult;
+import com.github.javaparser.Problem;
 import com.github.javaparser.TokenRange;
 import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.ImportDeclaration;
+import com.github.javaparser.ast.Modifier;
 import com.github.javaparser.ast.Node;
+import com.github.javaparser.ast.body.AnnotationDeclaration;
 import com.github.javaparser.ast.body.BodyDeclaration;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.ConstructorDeclaration;
 import com.github.javaparser.ast.body.EnumDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
+import com.github.javaparser.ast.body.InitializerDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.comments.BlockComment;
 import com.github.javaparser.ast.comments.Comment;
 import com.github.javaparser.ast.comments.JavadocComment;
 import com.github.javaparser.ast.comments.LineComment;
+import com.github.javaparser.ast.expr.Expression;
+import com.github.javaparser.ast.expr.FieldAccessExpr;
+import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.visitor.GenericVisitorAdapter;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 import com.github.javaparser.javadoc.description.JavadocDescription;
 import com.github.javaparser.javadoc.description.JavadocInlineTag;
+import com.github.javaparser.resolution.MethodAmbiguityException;
+import com.github.javaparser.resolution.UnsolvedSymbolException;
+import com.github.javaparser.resolution.declarations.ResolvedFieldDeclaration;
+import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
+import com.github.javaparser.resolution.declarations.ResolvedValueDeclaration;
 import gradestyle.Repo;
 import gradestyle.config.CommentingConfig;
 import gradestyle.config.Config;
-import gradestyle.config.JavaDocConfig;
+import gradestyle.config.OrderConfig;
+import gradestyle.config.OrderConfig.OrderElement;
+import gradestyle.config.javadocconfig.JavadocClassConfig;
+import gradestyle.config.javadocconfig.JavadocConstructorConfig;
+import gradestyle.config.javadocconfig.JavadocFieldConfig;
+import gradestyle.config.javadocconfig.JavadocMethodConfig;
+import gradestyle.config.programmingpracticeconfig.FinalizeOverrideConfig;
+import gradestyle.config.programmingpracticeconfig.UnqualifiedStaticAccessConfig;
 import gradestyle.util.FileUtils;
+import gradestyle.validator.Category;
 import gradestyle.validator.Type;
 import gradestyle.validator.Validator;
 import gradestyle.validator.ValidatorException;
@@ -35,6 +57,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
@@ -44,12 +67,26 @@ import org.apache.commons.text.similarity.LevenshteinDistance;
 public class JavaParser implements Validator {
   private CommentingConfig commentingConfig;
 
-  private JavaDocConfig javaDocConfig;
+  private JavadocClassConfig javadocClassConfig;
+  private JavadocMethodConfig javadocMethodConfig;
+  private JavadocFieldConfig javadocFieldConfig;
+  private JavadocConstructorConfig javadocConstructorConfig;
+  private FinalizeOverrideConfig finalizeOverrideConfig;
+  private UnqualifiedStaticAccessConfig unqualifiedStaticAccessConfig;
+  private OrderConfig orderConfig;
 
   @Override
   public void setup(Config config) {
     this.commentingConfig = config.getCategoryConfig(CommentingConfig.class);
-    this.javaDocConfig = config.getCategoryConfig(JavaDocConfig.class);
+
+    this.javadocClassConfig = config.getCategoryConfig(JavadocClassConfig.class);
+    this.javadocMethodConfig = config.getCategoryConfig(JavadocMethodConfig.class);
+    this.javadocFieldConfig = config.getCategoryConfig(JavadocFieldConfig.class);
+    this.javadocConstructorConfig = config.getCategoryConfig(JavadocConstructorConfig.class);
+    this.orderConfig = config.getCategoryConfig(OrderConfig.class);
+    this.finalizeOverrideConfig = config.getCategoryConfig(FinalizeOverrideConfig.class);
+    this.unqualifiedStaticAccessConfig =
+        config.getCategoryConfig(UnqualifiedStaticAccessConfig.class);
   }
 
   @Override
@@ -67,17 +104,35 @@ public class JavaParser implements Validator {
 
   private void runJavaparser(Repo repo, Violations violations)
       throws ValidatorException, IOException {
+
+    com.github.javaparser.JavaParser javaParser = gradestyle.util.JavaParser.get(repo);
+
     for (Path file : FileUtils.getJavaSrcFiles(repo.getDir()).toList()) {
-      ParseResult<CompilationUnit> result = gradestyle.util.JavaParser.get(repo).parse(file);
+      ParseResult<CompilationUnit> result = javaParser.parse(file);
 
       if (!result.isSuccessful()) {
-        throw new ValidatorException(file);
+        List<Problem> problems = result.getProblems();
+        int numProblems = problems.size();
+
+        if (numProblems == 1) {
+          throw new ValidatorException(file, problems.get(0).getVerboseMessage());
+        } else if (numProblems > 1) {
+          StringBuilder message = new StringBuilder();
+          for (int i = 0; i < numProblems - 1; i++) {
+            message.append(String.valueOf(i)).append(") ");
+            message.append(problems.get(i).getMessage()).append("\n");
+          }
+        }
       }
 
       CompilationUnit cu = result.getResult().get();
 
       privateFieldViolations(file).visit(cu, violations);
-      classOrderingViolations(file).visit(cu, violations);
+
+      if (orderConfig != null) {
+        List<OrderElement> ordering = orderConfig.getOrdering();
+        classOrderingViolations(file, ordering).visit(cu, violations);
+      }
 
       if (commentingConfig != null) {
         IOException e = commentFrequencyViolations(file).visit(cu, violations);
@@ -89,8 +144,26 @@ public class JavaParser implements Validator {
         commentMeaningViolations(file).visit(cu, violations);
       }
 
-      if (javaDocConfig != null) {
-        javadocCommentViolations(file).visit(cu, violations);
+      if (javadocFieldConfig != null) {
+        javadocFieldViolations(file).visit(cu, violations);
+      }
+      if (javadocMethodConfig != null) {
+        javadocMethodViolations(file).visit(cu, violations);
+      }
+      if (javadocConstructorConfig != null) {
+        javadocConstructorViolations(file).visit(cu, violations);
+      }
+      if (javadocClassConfig != null) {
+        javadocClassViolations(file).visit(cu, violations);
+      }
+
+      if (finalizeOverrideConfig != null) {
+        finalizeNotAllowedViolation(file).visit(cu, violations);
+      }
+
+      if (unqualifiedStaticAccessConfig != null) {
+        unqualifiedStaticMethodViolations(file).visit(cu, violations);
+        unqualifiedStaticFieldViolations(file).visit(cu, violations);
       }
 
       commentViolations(repo, file, cu, violations);
@@ -125,10 +198,6 @@ public class JavaParser implements Validator {
 
         long commentLines = 0;
 
-        if (decl.getJavadocComment().isPresent()) {
-          commentLines += numLines(decl.getJavadocComment().get());
-        }
-
         for (Comment comment : decl.getAllContainedComments()) {
           commentLines += numLines(comment);
         }
@@ -151,6 +220,7 @@ public class JavaParser implements Validator {
       }
 
       private long numLines(Node node) throws IOException {
+
         try (Stream<String> lines = Files.lines(file)) {
           return lines
               .skip(getFirstLine(node) - 1)
@@ -160,6 +230,189 @@ public class JavaParser implements Validator {
               .filter(line -> !line.equals("{"))
               .filter(line -> !line.equals("}"))
               .count();
+        }
+      }
+    };
+  }
+
+  private VoidVisitorAdapter<Violations> unqualifiedStaticMethodViolations(Path file) {
+    return new VoidVisitorAdapter<Violations>() {
+      @Override
+      public void visit(MethodCallExpr methodCall, Violations violations) {
+        super.visit(methodCall, violations);
+        try {
+          ResolvedMethodDeclaration resolvedMethod = methodCall.resolve();
+
+          if (!resolvedMethod.isStatic()) {
+            return;
+          }
+
+          Expression scope = methodCall.getScope().orElse(null);
+          if (scope == null) {
+            return;
+          }
+
+          // Check if any part of the access chain is instance-based
+          if (isInstanceAccess(scope) || isEnumConstant(scope)) {
+            addViolation(
+                violations, Type.UnqualifiedStaticAccess_Method, file, getFirstLine(methodCall));
+          }
+        } catch (UnsolvedSymbolException e) {
+          // Handle unresolved symbol case gracefully
+          // System.err.println("Unresolved method call: " + methodCall + " at file: " + file);
+        } catch (UnsupportedOperationException e) {
+          // System.err.println("Unsupported method call: " + methodCall + " at file: " + file);
+        } catch (MethodAmbiguityException e) {
+          // System.err.println("Ambiguous method call: " + methodCall + " at file: " + file);
+        } catch (Exception e) {
+          System.err.println("Unknown exception thrown during symbol resolution: " + e.getClass());
+        }
+      }
+
+      private boolean isInstanceAccess(Expression expr) {
+        if (expr instanceof NameExpr) {
+          try {
+            ResolvedValueDeclaration v = expr.asNameExpr().resolve();
+
+            return !(v instanceof ResolvedFieldDeclaration
+                && ((ResolvedFieldDeclaration) v).isStatic());
+          } catch (UnsolvedSymbolException e) {
+            return false;
+          }
+
+        } else if (expr.isFieldAccessExpr()) {
+          ResolvedValueDeclaration v = expr.asFieldAccessExpr().resolve();
+
+          if (v.isType()) {
+            if (v.asType().isEnum()) {
+              return false;
+            }
+          }
+        }
+
+        return true;
+      }
+
+      private boolean isEnumConstant(Expression expr) {
+        if (expr instanceof NameExpr) {
+          try {
+            ResolvedValueDeclaration resolvedValue = ((NameExpr) expr).resolve();
+            if (resolvedValue.isEnumConstant()) {
+
+              return true; // The field is an enum constant
+            }
+          } catch (UnsolvedSymbolException e) {
+            return false;
+          }
+        } else if (expr instanceof FieldAccessExpr) {
+          try {
+            ResolvedValueDeclaration resolvedValue = ((FieldAccessExpr) expr).resolve();
+            if (resolvedValue.isEnumConstant()) {
+              return true; // The field is an enum constant
+            }
+          } catch (UnsolvedSymbolException e) {
+            return false;
+          }
+        }
+        return false;
+      }
+    };
+  }
+
+  private VoidVisitorAdapter<Violations> unqualifiedStaticFieldViolations(Path file) {
+    return new VoidVisitorAdapter<Violations>() {
+      @Override
+      public void visit(FieldAccessExpr fieldAccess, Violations violations) {
+        super.visit(fieldAccess, violations);
+
+        try {
+          ResolvedValueDeclaration v = fieldAccess.resolve();
+          if (!v.isField()) {
+            return;
+          }
+          ResolvedFieldDeclaration resolvedField = v.asField();
+
+          // skip non static calls
+          if (!resolvedField.isStatic()) {
+            return;
+          }
+
+          Expression scope = fieldAccess.getScope();
+
+          // null scope means the method was called from inside the class, which is a valid use of a
+          // static method.
+          if (scope == null) {
+            return;
+          }
+
+          // If the field is accessed via an instance or enum constant, flag it.
+          if (isInstanceAccess(scope) || isEnumConstant(scope)) {
+            addViolation(
+                violations, Type.UnqualifiedStaticAccess_Field, file, getFirstLine(fieldAccess));
+          }
+
+        } catch (UnsolvedSymbolException e) {
+        } catch (UnsupportedOperationException e) {
+          // may want to update this in the future if javaparser gets updated to resolve wild cards.
+        } catch (Exception e) {
+          System.err.println("Unknown error occurred during parsing: " + e.getClass());
+        }
+      }
+
+      private boolean isInstanceAccess(Expression expr) {
+        if (expr instanceof FieldAccessExpr) {
+          return isInstanceAccess(((FieldAccessExpr) expr).getScope());
+        } else if (expr instanceof NameExpr) {
+          try {
+            ResolvedValueDeclaration resolvedValue = ((NameExpr) expr).resolve();
+            return !(resolvedValue instanceof ResolvedFieldDeclaration
+                && ((ResolvedFieldDeclaration) resolvedValue).isStatic());
+          } catch (UnsolvedSymbolException e) {
+            return false;
+          }
+        }
+        return true;
+      }
+
+      private boolean isEnumConstant(Expression expr) {
+        if (expr instanceof NameExpr) {
+          try {
+            ResolvedValueDeclaration resolvedValue = ((NameExpr) expr).resolve();
+            if (resolvedValue.isEnumConstant()) {
+
+              return true;
+            }
+          } catch (UnsolvedSymbolException e) {
+            return false;
+          }
+        } else if (expr instanceof FieldAccessExpr) {
+          try {
+            ResolvedValueDeclaration resolvedValue = ((FieldAccessExpr) expr).resolve();
+            if (resolvedValue.isEnumConstant()) {
+              return true;
+            }
+          } catch (UnsolvedSymbolException e) {
+            return false;
+          }
+        }
+        return false;
+      }
+    };
+  }
+
+  private VoidVisitorAdapter<Violations> finalizeNotAllowedViolation(Path file) {
+    return new VoidVisitorAdapter<Violations>() {
+      @Override
+      public void visit(MethodDeclaration method, Violations violations) {
+        super.visit(method, violations);
+
+        if (method.getNameAsString().equals("finalize")
+            && method.getParameters().isEmpty()
+            && method.getTypeAsString().equals("void")
+            && (method.getModifiers().contains(Modifier.publicModifier())
+                || method.getModifiers().contains(Modifier.protectedModifier()))) {
+
+          addViolation(violations, Type.FinalizeOverride, file, getFirstLine(method));
         }
       }
     };
@@ -194,7 +447,7 @@ public class JavaParser implements Validator {
         String code = node.removeComment().toString();
         int distance = new LevenshteinDistance().apply(text, code);
 
-        if (commentingConfig == null || distance > commentingConfig.getLevenshteinDistance()) {
+        if (commentingConfig == null || distance >= commentingConfig.getLevenshteinDistance()) {
           return;
         }
 
@@ -213,17 +466,17 @@ public class JavaParser implements Validator {
           return;
         }
 
-        addViolation(violations, Type.PrivateMembers, file, getFirstLine(decl.getVariable(0)));
+        addViolation(violations, Type.PrivateInstances, file, getFirstLine(decl.getVariable(0)));
       }
     };
   }
 
-  private VoidVisitorAdapter<Violations> classOrderingViolations(Path file) {
+  private VoidVisitorAdapter<Violations> classOrderingViolations(
+      Path file, List<OrderElement> ordering) {
     return new VoidVisitorAdapter<Violations>() {
       @Override
       public void visit(ClassOrInterfaceDeclaration decl, Violations violations) {
         super.visit(decl, violations);
-
         if (!decl.isInterface()) {
           visitAll(decl, violations);
         }
@@ -237,6 +490,8 @@ public class JavaParser implements Validator {
 
       private <T extends TypeDeclaration<?>> void visitAll(
           TypeDeclaration<T> decl, Violations violations) {
+        // Group members by type
+        @SuppressWarnings("rawtypes")
         List<TypeDeclaration> innerClasses =
             decl.getMembers().stream()
                 .filter(
@@ -251,14 +506,6 @@ public class JavaParser implements Validator {
                 .filter(FieldDeclaration::isStatic)
                 .toList();
 
-        if (!innerClasses.isEmpty()) {
-          staticFields.stream()
-              .filter(field -> isBefore(field, getLastElement(innerClasses)))
-              .map(field -> field.getVariable(0))
-              .map(JavaParser.this::getFirstLine)
-              .forEach(line -> addViolation(violations, Type.Ordering_StaticField, file, line));
-        }
-
         List<MethodDeclaration> staticMethods =
             decl.getMembers().stream()
                 .filter(BodyDeclaration::isMethodDeclaration)
@@ -266,46 +513,12 @@ public class JavaParser implements Validator {
                 .filter(MethodDeclaration::isStatic)
                 .toList();
 
-        if (!staticFields.isEmpty() || !innerClasses.isEmpty()) {
-          Node lastDeclaration;
-
-          if (!staticFields.isEmpty()) {
-            lastDeclaration = getLastElement(staticFields);
-          } else {
-            lastDeclaration = getLastElement(innerClasses);
-          }
-
-          staticMethods.stream()
-              .filter(method -> isBefore(method, lastDeclaration))
-              .map(MethodDeclaration::getName)
-              .map(JavaParser.this::getFirstLine)
-              .forEach(line -> addViolation(violations, Type.Ordering_StaticMethod, file, line));
-        }
-
-        List<FieldDeclaration> fields =
+        List<FieldDeclaration> instanceFields =
             decl.getMembers().stream()
                 .filter(BodyDeclaration::isFieldDeclaration)
                 .map(BodyDeclaration::asFieldDeclaration)
                 .filter(Predicate.not(FieldDeclaration::isStatic))
                 .toList();
-
-        if (!staticMethods.isEmpty() || !staticFields.isEmpty() || !innerClasses.isEmpty()) {
-          Node lastDeclaration;
-
-          if (!staticMethods.isEmpty()) {
-            lastDeclaration = getLastElement(staticMethods);
-          } else if (!staticFields.isEmpty()) {
-            lastDeclaration = getLastElement(staticFields);
-          } else {
-            lastDeclaration = getLastElement(innerClasses);
-          }
-
-          fields.stream()
-              .filter(field -> isBefore(field, lastDeclaration))
-              .map(field -> field.getVariable(0))
-              .map(JavaParser.this::getFirstLine)
-              .forEach(line -> addViolation(violations, Type.Ordering_Field, file, line));
-        }
 
         List<ConstructorDeclaration> constructors =
             decl.getMembers().stream()
@@ -313,60 +526,70 @@ public class JavaParser implements Validator {
                 .map(BodyDeclaration::asConstructorDeclaration)
                 .toList();
 
-        if (!fields.isEmpty()
-            || !staticMethods.isEmpty()
-            || !staticFields.isEmpty()
-            || !innerClasses.isEmpty()) {
-          Node lastDeclaration;
-
-          if (!fields.isEmpty()) {
-            lastDeclaration = getLastElement(fields);
-          } else if (!staticMethods.isEmpty()) {
-            lastDeclaration = getLastElement(staticMethods);
-          } else if (!staticFields.isEmpty()) {
-            lastDeclaration = getLastElement(staticFields);
-          } else {
-            lastDeclaration = getLastElement(innerClasses);
-          }
-
-          constructors.stream()
-              .filter(constructor -> isBefore(constructor, lastDeclaration))
-              .map(ConstructorDeclaration::getName)
-              .map(JavaParser.this::getFirstLine)
-              .forEach(line -> addViolation(violations, Type.Ordering_Constructor, file, line));
-        }
-
-        List<MethodDeclaration> methods =
+        List<MethodDeclaration> instanceMethods =
             decl.getMembers().stream()
                 .filter(BodyDeclaration::isMethodDeclaration)
                 .map(BodyDeclaration::asMethodDeclaration)
                 .filter(Predicate.not(MethodDeclaration::isStatic))
                 .toList();
 
-        if (!constructors.isEmpty()
-            || !fields.isEmpty()
-            || !staticMethods.isEmpty()
-            || !staticFields.isEmpty()
-            || !innerClasses.isEmpty()) {
-          Node lastDeclaration;
+        Map<OrderElement, List<? extends Node>> groups =
+            Map.of(
+                OrderElement.InnerClasses, innerClasses,
+                OrderElement.StaticFields, staticFields,
+                OrderElement.StaticMethods, staticMethods,
+                OrderElement.InstanceFields, instanceFields,
+                OrderElement.Constructors, constructors,
+                OrderElement.InstanceMethods, instanceMethods);
 
-          if (!constructors.isEmpty()) {
-            lastDeclaration = getLastElement(constructors);
-          } else if (!fields.isEmpty()) {
-            lastDeclaration = getLastElement(fields);
-          } else if (!staticMethods.isEmpty()) {
-            lastDeclaration = getLastElement(staticMethods);
-          } else if (!staticFields.isEmpty()) {
-            lastDeclaration = getLastElement(staticFields);
-          } else {
-            lastDeclaration = getLastElement(innerClasses);
+        for (int i = 0; i < ordering.size(); i++) {
+          OrderElement orderElement = ordering.get(i);
+          List<? extends Node> currentGroup = groups.get(orderElement);
+
+          for (Node currentNode : currentGroup) {
+            for (int j = i + 1; j < ordering.size(); j++) {
+              OrderElement order = ordering.get(j);
+              List<? extends Node> afterGroup = groups.get(order);
+
+              for (Node node : afterGroup) {
+                if (isBefore(node, currentNode)) {
+                  addOrderViolation(
+                      violations,
+                      Type.valueOf("Ordering_" + order.name()),
+                      file,
+                      getNodeName(node),
+                      getNodeName(currentNode),
+                      getFirstLine(node));
+                  // only have 1 violation for each out of order-violation
+                  continue;
+                }
+              }
+            }
           }
+        }
+      }
 
-          methods.stream()
-              .filter(method -> isBefore(method, lastDeclaration))
-              .map(MethodDeclaration::getName)
-              .map(JavaParser.this::getFirstLine)
-              .forEach(line -> addViolation(violations, Type.Ordering_Method, file, line));
+      private String getNodeName(Node node) {
+        if (node instanceof MethodDeclaration) {
+          return ((MethodDeclaration) node).getNameAsString();
+        } else if (node instanceof FieldDeclaration) {
+          return ((FieldDeclaration) node).getVariables().get(0).getNameAsString();
+        } else if (node instanceof ConstructorDeclaration) {
+          return ((ConstructorDeclaration) node).getNameAsString();
+        } else if (node instanceof EnumDeclaration) {
+          return ((EnumDeclaration) node).getNameAsString();
+        } else if (node instanceof ClassOrInterfaceDeclaration) {
+          return ((ClassOrInterfaceDeclaration) node).getNameAsString();
+        } else if (node instanceof TypeDeclaration<?>) {
+          return ((TypeDeclaration<?>) node).getNameAsString();
+        } else if (node instanceof ImportDeclaration) {
+          return ((ImportDeclaration) node).getNameAsString();
+        } else if (node instanceof AnnotationDeclaration) {
+          return ((AnnotationDeclaration) node).getNameAsString();
+        } else if (node instanceof InitializerDeclaration) {
+          return "Static Initializer Block";
+        } else {
+          return "unknown";
         }
       }
 
@@ -380,37 +603,132 @@ public class JavaParser implements Validator {
     };
   }
 
-  private VoidVisitorAdapter<Violations> javadocCommentViolations(Path file) {
+  private void addOrderViolation(
+      Violations violations, Type type, Path file, String element, String reference, int line) {
+    Violation violation = new Violation(type, file, line);
+    String message = String.format(type.getMessage(), element, reference);
+    OrderViolationResults.addViolation(violation, message);
+    violations.getViolations().add(violation);
+  }
+
+  private VoidVisitorAdapter<Violations> javadocClassViolations(Path file) {
     return new VoidVisitorAdapter<Violations>() {
       @Override
-      public void visit(JavadocComment comment, Violations violations) {
-        super.visit(comment, violations);
-
-        Optional<Node> commentedNode = comment.getCommentedNode();
-
-        if (commentedNode.isEmpty()) {
-          return;
-        }
-
-        if (commentedNode.get() instanceof MethodDeclaration
-            && ((MethodDeclaration) commentedNode.get()).isAnnotationPresent("Override")) {
-          return;
-        }
-
-        JavadocDescription description = comment.parse().getDescription();
-
-        if (description.isEmpty() || description.getElements().get(0) instanceof JavadocInlineTag) {
-          addViolation(violations, Type.JavaDoc_MissingSummary, file, getFirstLine(comment));
-          return;
-        }
-
-        long words = Pattern.compile("[\\w-]+").matcher(description.toText()).results().count();
-
-        if (words < javaDocConfig.getMinWords()) {
-          addViolation(violations, Type.JavaDoc_SummaryLength, file, getFirstLine(comment));
+      public void visit(ClassOrInterfaceDeclaration node, Violations violations) {
+        super.visit(node, violations);
+        Optional<Comment> comment = node.getComment();
+        if (comment.isEmpty()) {
+          addViolation(violations, Type.JavadocClass_Missing, file, getFirstLine(node));
+        } else if (comment.get() instanceof JavadocComment) {
+          // Validate Javadoc if it exists and is a JavadocComment
+          validateJavadoc((JavadocComment) comment.get(), violations, file, Category.JavadocClass);
+        } else {
+          // Optionally handle cases where the comment is not a JavadocComment
+          addViolation(violations, Type.Javadoc_Invalid, file, getFirstLine(node));
         }
       }
     };
+  }
+
+  private VoidVisitorAdapter<Violations> javadocFieldViolations(Path file) {
+    return new VoidVisitorAdapter<Violations>() {
+      @Override
+      public void visit(FieldDeclaration node, Violations violations) {
+        super.visit(node, violations);
+        Optional<Comment> comment = node.getComment();
+        if (comment.isEmpty()) {
+          addViolation(violations, Type.JavadocField_Missing, file, getFirstLine(node));
+        } else if (comment.get() instanceof JavadocComment) {
+          // Validate Javadoc if it exists and is a JavadocComment
+          validateJavadoc((JavadocComment) comment.get(), violations, file, Category.JavadocField);
+        } else {
+          // Optionally handle cases where the comment is not a JavadocComment
+          addViolation(violations, Type.Javadoc_Invalid, file, getFirstLine(node));
+        }
+      }
+    };
+  }
+
+  private VoidVisitorAdapter<Violations> javadocConstructorViolations(Path file) {
+    return new VoidVisitorAdapter<Violations>() {
+      @Override
+      public void visit(ConstructorDeclaration node, Violations violations) {
+        super.visit(node, violations);
+        Optional<Comment> comment = node.getComment();
+        if (comment.isEmpty()) {
+          addViolation(violations, Type.JavadocConstructor_Missing, file, getFirstLine(node));
+        } else if (comment.get() instanceof JavadocComment) {
+          // Validate Javadoc if it exists and is a JavadocComment
+          validateJavadoc(
+              (JavadocComment) comment.get(), violations, file, Category.JavadocConstructor);
+        } else {
+          // Optionally handle cases where the comment is not a JavadocComment
+          addViolation(violations, Type.Javadoc_Invalid, file, getFirstLine(node));
+        }
+      }
+    };
+  }
+
+  private VoidVisitorAdapter<Violations> javadocMethodViolations(Path file) {
+    return new VoidVisitorAdapter<Violations>() {
+      @Override
+      public void visit(MethodDeclaration node, Violations violations) {
+        super.visit(node, violations);
+
+        if (node.getAnnotationByName("Override").isPresent()) {
+          return;
+        }
+
+        Optional<Comment> comment = node.getComment();
+
+        if (comment.isEmpty()) {
+          addViolation(violations, Type.JavadocMethod_Missing, file, getFirstLine(node));
+        } else if (comment.get() instanceof JavadocComment) {
+          // Validate Javadoc if it exists and is a JavadocComment
+          validateJavadoc((JavadocComment) comment.get(), violations, file, Category.JavadocMethod);
+        } else {
+          // handle cases where the comment is not a javadocComment
+          addViolation(violations, Type.Javadoc_Invalid, file, getFirstLine(node));
+        }
+      }
+    };
+  }
+
+  private void validateJavadoc(
+      JavadocComment comment, Violations violations, Path file, Category category) {
+    JavadocDescription description = comment.parse().getDescription();
+
+    if (description.isEmpty() || description.getElements().get(0) instanceof JavadocInlineTag) {
+      addViolation(violations, Type.Javadoc_MissingSummary, file, getFirstLine(comment));
+      return;
+    }
+
+    long words = Pattern.compile("[\\w-]+").matcher(description.toText()).results().count();
+
+    int minWords;
+
+    switch (category) {
+      case JavadocClass:
+        minWords = javadocClassConfig.getMinWords();
+        break;
+
+      case JavadocMethod:
+        minWords = javadocMethodConfig.getMinWords();
+        break;
+
+      case JavadocField:
+        minWords = javadocFieldConfig.getMinWords();
+        break;
+      case JavadocConstructor:
+        minWords = javadocConstructorConfig.getMinWords();
+        break;
+
+      default:
+        throw new IllegalArgumentException("Javadoc category not found when finding minWords");
+    }
+    if (words < minWords) {
+      addViolation(violations, Type.Javadoc_SummaryLength, file, getFirstLine(comment));
+    }
   }
 
   private void commentViolations(Repo repo, Path file, CompilationUnit cu, Violations violations) {
@@ -424,7 +742,7 @@ public class JavaParser implements Validator {
 
       String code;
       if (parent.get() instanceof BlockStmt) {
-        code = "class X { void x() {" + contents + "; } }";
+        code = "class X { void x() {" + contents + " } }";
       } else if (parent.get() instanceof ClassOrInterfaceDeclaration) {
         code = "class X {" + contents + " }";
       } else {

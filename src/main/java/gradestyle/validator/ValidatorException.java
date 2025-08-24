@@ -13,6 +13,11 @@ public class ValidatorException extends Exception {
     this.path = path;
   }
 
+  public ValidatorException(Path path, String message) {
+    super(message);
+    this.path = path;
+  }
+
   public Path getPath() {
     return path;
   }

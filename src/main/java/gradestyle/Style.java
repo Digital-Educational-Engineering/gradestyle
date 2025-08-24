@@ -12,6 +12,7 @@ import gradestyle.validator.cpd.Cpd;
 import gradestyle.validator.javaparser.JavaParser;
 import gradestyle.validator.pmd.Pmd;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 public class Style {
@@ -24,43 +25,74 @@ public class Style {
 
     Github github = new Github(config);
     List<Repo> repos = Repo.getRepos(github);
-    List<ValidationResult> results = runValidation(config, repos);
+    List<ValidationResult> results = new ArrayList<>();
 
-    outputCsv(config, results);
-    outputMarkdown(config, results);
-    sendGithubFeedback(github, results);
-  }
-
-  private static List<ValidationResult> runValidation(Config config, List<Repo> repos) {
     Validator[] validators = {new Checkstyle(), new JavaParser(), new Pmd(), new Cpd()};
-
-    Validation validation = new Validation(validators, config);
+    Csv csv = setupCsv(config);
 
     try {
-      return validation.validate(repos);
+      Validation validation = new Validation(validators, config);
+
+      for (Validator validator : validators) {
+        validator.setup(config);
+      }
+
+      for (Repo repo : repos) {
+        ValidationResult result = validation.validate(repo);
+
+        incrementCsv(csv, result);
+
+        results.add(result);
+      }
     } catch (ValidatorException e) {
       System.err.println("Unable to run style validation.");
       e.printStackTrace();
       System.exit(1);
+    } finally {
+      if (csv != null) {
+        try {
+          csv.close();
+        } catch (IOException e) {
+          e.printStackTrace();
+        }
+      }
     }
 
-    return null;
+    // a future work could be to make the markdown and github feedback incremental as well, that way
+    // we don't have to hold the list of results in memory, would only need to process one a time.
+    outputMarkdown(config, results);
+    sendGithubFeedback(github, results);
   }
 
-  private static void outputCsv(Config config, List<ValidationResult> results) {
-    if (config.getStyleFeedback().getReportsCsv() == null) {
+  private static void incrementCsv(Csv csv, ValidationResult result) {
+
+    if (csv == null) {
       return;
     }
 
-    ValidationCsv writer = new ValidationCsv(config.getCategoryConfigs(), results);
-    Csv csv = new Csv(config.getStyleFeedback().getReportsCsv(), writer);
-
     try {
-      csv.write();
+      csv.write(result);
     } catch (IOException e) {
       System.err.println("Unable to write CSV file.");
       e.printStackTrace();
       System.exit(1);
+    }
+  }
+
+  private static Csv setupCsv(Config config) {
+    if (config.getStyleFeedback().getReportsCsv() == null) {
+      System.out.println("no csv");
+      return null;
+    }
+
+    ValidationCsv writer = new ValidationCsv(config.getCategoryConfigs());
+    try {
+      return new Csv(config.getStyleFeedback().getReportsCsv(), writer);
+    } catch (IOException e) {
+      System.err.println("Unable to open CSV file.");
+      e.printStackTrace();
+      System.exit(1);
+      return null;
     }
   }
 

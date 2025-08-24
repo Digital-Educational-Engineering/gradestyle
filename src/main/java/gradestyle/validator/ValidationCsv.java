@@ -14,11 +14,8 @@ import java.util.stream.Stream;
 public class ValidationCsv implements Writer {
   private List<CategoryConfig> configs;
 
-  private List<ValidationResult> results;
-
-  public ValidationCsv(List<CategoryConfig> configs, List<ValidationResult> results) {
+  public ValidationCsv(List<CategoryConfig> configs) {
     this.configs = configs;
-    this.results = results;
   }
 
   @Override
@@ -43,17 +40,7 @@ public class ValidationCsv implements Writer {
   }
 
   @Override
-  public List<List<Object>> getRows() throws IOException {
-    List<List<Object>> rows = new ArrayList<>();
-
-    for (ValidationResult result : results) {
-      rows.add(getRow(result));
-    }
-
-    return rows;
-  }
-
-  private List<Object> getRow(ValidationResult result) throws IOException {
+  public List<Object> getRow(ValidationResult result) throws IOException {
     List<Object> row = new ArrayList<>();
 
     row.add(result.getRepo().getName());

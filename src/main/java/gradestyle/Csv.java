@@ -1,5 +1,6 @@
 package gradestyle;
 
+import gradestyle.validator.ValidationResult;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -12,25 +13,30 @@ public class Csv {
   public interface Writer {
     List<String> getHeaders() throws IOException;
 
-    List<List<Object>> getRows() throws IOException;
+    List<Object> getRow(ValidationResult result) throws IOException;
   }
 
   private Path file;
 
   private Writer writer;
+  private CSVPrinter printer;
 
-  public Csv(Path file, Writer writer) {
+  public Csv(Path file, Writer writer) throws IOException {
     this.file = file;
     this.writer = writer;
-  }
 
-  public void write() throws IOException {
     BufferedWriter bufferedWriter = Files.newBufferedWriter(file);
     String[] headers = writer.getHeaders().toArray(String[]::new);
     CSVFormat format = CSVFormat.Builder.create().setHeader(headers).build();
-    CSVPrinter printer = new CSVPrinter(bufferedWriter, format);
+    this.printer = new CSVPrinter(bufferedWriter, format);
+  }
 
-    printer.printRecords(writer.getRows());
+  public void write(ValidationResult result) throws IOException {
+    printer.printRecord(writer.getRow(result));
+    printer.flush();
+  }
+
+  public void close() throws IOException {
     printer.close();
   }
 }

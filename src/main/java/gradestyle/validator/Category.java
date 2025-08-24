@@ -12,7 +12,12 @@ import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.comments.Comment;
-import com.github.javaparser.ast.stmt.IfStmt;
+import com.github.javaparser.ast.expr.FieldAccessExpr;
+import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.stmt.CatchClause;
+import com.github.javaparser.resolution.UnsolvedSymbolException;
+import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
+import com.github.javaparser.resolution.declarations.ResolvedValueDeclaration;
 import gradestyle.Repo;
 import gradestyle.config.CategoryConfig;
 import gradestyle.util.FileUtils;
@@ -34,14 +39,21 @@ public enum Category {
   VariableNames,
   PackageNames,
   Commenting,
-  JavaDoc,
-  PrivateMembers,
+  JavadocClass,
+  JavadocMethod,
+  JavadocConstructor,
+  JavadocField,
+  Javadoc,
+  PrivateInstances,
   Ordering,
   Useless,
   StringConcatenation,
   Clones,
   JavaFX,
-  EarlyReturn;
+  MissingOverride,
+  FinalizeOverride,
+  UnqualifiedStaticAccess,
+  EmptyCatchBlock;
 
   public static Map<Category, Integer> getCategoryScores(
       ValidationResult result, List<CategoryConfig> configs) throws IOException {
@@ -106,8 +118,10 @@ public enum Category {
 
     long normalisation = 0;
 
+    com.github.javaparser.JavaParser parser = JavaParser.get(repo);
+
     for (Path file : FileUtils.getJavaSrcFiles(repo.getDir()).toList()) {
-      ParseResult<CompilationUnit> result = JavaParser.get(repo).parse(file);
+      ParseResult<CompilationUnit> result = parser.parse(file);
 
       if (!result.isSuccessful()) {
         throw new IOException();
@@ -119,8 +133,8 @@ public enum Category {
         case Formatting:
         case Commenting:
         case Useless:
-        case StringConcatenation:
-        case Clones:
+          normalisation += cu.getRange().get().getLineCount();
+          break;
         case ClassNames:
           normalisation += classCounter(cu);
           break;
@@ -133,7 +147,7 @@ public enum Category {
         case PackageNames:
           normalisation += packageCounter(cu);
           break;
-        case PrivateMembers:
+        case PrivateInstances:
           normalisation += instanceFieldCounter(cu);
           break;
         case Ordering:
@@ -143,7 +157,23 @@ public enum Category {
                   + constructorCounter(cu)
                   + methodCounter(cu);
           break;
-        case JavaDoc:
+        case JavadocClass:
+          normalisation += cu.findAll(ClassOrInterfaceDeclaration.class).stream().count();
+          break;
+
+        case JavadocMethod:
+          normalisation += cu.findAll(MethodDeclaration.class).stream().count();
+          break;
+
+        case JavadocField:
+          normalisation += cu.findAll(FieldDeclaration.class).stream().count();
+          break;
+
+        case JavadocConstructor:
+          normalisation += cu.findAll(ConstructorDeclaration.class).stream().count();
+          break;
+
+        case Javadoc:
           normalisation +=
               cu.getAllComments().stream()
                   .filter(Comment::isJavadocComment)
@@ -152,9 +182,24 @@ public enum Category {
                   .mapToInt(Range::getLineCount)
                   .sum();
           break;
-        case EarlyReturn:
-          normalisation += ifStatementCounter(cu);
+
+        case MissingOverride:
+        case FinalizeOverride:
+          normalisation += methodCounter(cu);
           break;
+
+        case UnqualifiedStaticAccess:
+          normalisation += staticMemberAccessCount(cu);
+
+          break;
+        case EmptyCatchBlock:
+          normalisation += tryCatchCounter(cu);
+          break;
+
+        case StringConcatenation:
+          normalisation += loopCounter(cu);
+          break;
+
         default:
           throw new IllegalArgumentException("Unknown category: " + this);
       }
@@ -192,8 +237,54 @@ public enum Category {
     return cu.findAll(ConstructorDeclaration.class).size();
   }
 
-  private int ifStatementCounter(CompilationUnit cu) {
-    return cu.findAll(IfStmt.class).size();
+  private int loopCounter(CompilationUnit cu) {
+    return cu.findAll(com.github.javaparser.ast.stmt.ForStmt.class).size()
+        + cu.findAll(com.github.javaparser.ast.stmt.WhileStmt.class).size()
+        + cu.findAll(com.github.javaparser.ast.stmt.DoStmt.class).size()
+        + cu.findAll(com.github.javaparser.ast.stmt.ForEachStmt.class).size();
+  }
+
+  public int tryCatchCounter(CompilationUnit cu) {
+    return cu.findAll(CatchClause.class).size();
+  }
+
+  private long staticMemberAccessCount(CompilationUnit cu) {
+    long staticMethodCount = 0;
+    staticMethodCount =
+        cu.findAll(MethodCallExpr.class).stream()
+            .filter(
+                methodCall -> {
+                  try {
+                    ResolvedMethodDeclaration resolvedMethod = methodCall.resolve();
+                    return resolvedMethod.isStatic();
+                  } catch (UnsolvedSymbolException | UnsupportedOperationException e) {
+                    return false;
+                  } catch (RuntimeException e) {
+                    return false;
+                  }
+                })
+            .count();
+
+    long staticFieldCount =
+        cu.findAll(FieldAccessExpr.class).stream()
+            .filter(
+                fieldAccess -> {
+                  try {
+                    ResolvedValueDeclaration v = fieldAccess.resolve();
+
+                    if (v.isField()) {
+                      return v.asField().isStatic();
+                    }
+
+                    return false;
+
+                  } catch (Exception e) {
+                    return false;
+                  }
+                })
+            .count();
+
+    return staticFieldCount + staticMethodCount;
   }
 
   public List<Type> getTypes() {
@@ -202,6 +293,9 @@ public enum Category {
 
   @Override
   public String toString() {
-    return this == JavaDoc ? name() : name().replaceAll("(.)([A-Z])", "$1 $2");
+    if (this == Javadoc) {
+      return "Javadoc Formatting";
+    }
+    return name().replaceAll("(.)([A-Z])", "$1 $2");
   }
 }

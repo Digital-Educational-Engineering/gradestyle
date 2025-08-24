@@ -1,6 +1,15 @@
 package gradestyle.config;
 
 import gradestyle.config.CategoryConfig.Mode;
+import gradestyle.config.OrderConfig.OrderElement;
+import gradestyle.config.javadocconfig.JavadocClassConfig;
+import gradestyle.config.javadocconfig.JavadocConstructorConfig;
+import gradestyle.config.javadocconfig.JavadocFieldConfig;
+import gradestyle.config.javadocconfig.JavadocMethodConfig;
+import gradestyle.config.programmingpracticeconfig.EmptyCatchBlockConfig;
+import gradestyle.config.programmingpracticeconfig.FinalizeOverrideConfig;
+import gradestyle.config.programmingpracticeconfig.MissingOverrideConfig;
+import gradestyle.config.programmingpracticeconfig.UnqualifiedStaticAccessConfig;
 import gradestyle.validator.Category;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -108,6 +117,7 @@ public class Config {
       List<Integer> scoreList = config.getList(Integer.class, category.name() + ".scores");
 
       Collections.sort(scoreList);
+      int minWords;
 
       CategoryConfig categoryConfig = new CategoryConfig(category, examples, mode, scoreList);
 
@@ -124,24 +134,64 @@ public class Config {
                     categoryConfig, minLines, minFrequency, maxFrequency, levenshteinDistance);
             break;
           }
-        case JavaDoc:
-          {
-            int minWords = config.getInt(category.name() + ".minWords");
 
-            categoryConfig = new JavaDocConfig(categoryConfig, minWords);
-            break;
-          }
+        case JavadocClass:
+          minWords = config.getInt("JavadocClass.minWords", 5);
+          categoryConfig = new JavadocClassConfig(categoryConfig, minWords);
+
+          break;
+        case JavadocConstructor:
+          minWords = config.getInt("JavadocConstructor.minWords", 5);
+          categoryConfig = new JavadocConstructorConfig(categoryConfig, minWords);
+          break;
+        case JavadocField:
+          minWords = config.getInt("JavadocField.minWords", 5);
+          categoryConfig = new JavadocFieldConfig(categoryConfig, minWords);
+          break;
+        case JavadocMethod:
+          minWords = config.getInt("JavadocMethod.minWords", 5);
+          categoryConfig = new JavadocMethodConfig(categoryConfig, minWords);
+          break;
+
         case Clones:
           {
             int tokens = config.getInt(category.name() + ".tokens");
 
             categoryConfig = new ClonesConfig(categoryConfig, tokens);
+            break;
           }
+
+        case MissingOverride:
+          boolean includeDepedencies =
+              config.getBoolean("MissingOverride.includeDependencies", false);
+          categoryConfig = new MissingOverrideConfig(categoryConfig, includeDepedencies);
+          break;
+
+        case FinalizeOverride:
+          categoryConfig = new FinalizeOverrideConfig(categoryConfig);
+          break;
+
+        case UnqualifiedStaticAccess:
+          categoryConfig = new UnqualifiedStaticAccessConfig(categoryConfig);
+          break;
+
+        case EmptyCatchBlock:
+          categoryConfig = new EmptyCatchBlockConfig(categoryConfig);
+          break;
+
+        case Ordering:
+          List<OrderElement> ordering = OrderConfig.defaultOrdering();
+          ordering = config.getList(OrderElement.class, category.name() + ".order", ordering);
+          categoryConfig = new OrderConfig(categoryConfig, ordering);
+          break;
+
         default:
           break;
       }
 
-      categoryConfigs.add(categoryConfig);
+      if (!categoryConfigs.contains(categoryConfig)) {
+        categoryConfigs.add(categoryConfig);
+      }
     }
 
     return categoryConfigs;

@@ -50,7 +50,7 @@ public class Listener implements AuditListener {
       case "javadoc.parse.rule.error":
       case "javadoc.missed.html.close":
       case "javadoc.wrong.singleton.html.tag":
-        return Type.JavaDoc_Invalid;
+        return Type.Javadoc_Invalid;
     }
 
     switch (module) {
@@ -147,6 +147,7 @@ public class Listener implements AuditListener {
             return Type.Formatting_ExcessImportSeparator;
         }
         break;
+
       case "MethodParamPad":
       case "NoWhitespaceBefore":
       case "ParenPad":
@@ -154,53 +155,47 @@ public class Listener implements AuditListener {
       case "AnnotationLocation":
         return Type.Formatting_AnnotationLocation;
       case "NonEmptyAtclauseDescription":
-        return Type.JavaDoc_MissingTagDescription;
+        return Type.Javadoc_MissingTagDescription;
       case "InvalidJavadocPosition":
-        return Type.JavaDoc_Position;
+        return Type.Javadoc_Position;
       case "JavadocTagContinuationIndentation":
-        return Type.JavaDoc_TagDescriptionIndentation;
+        return Type.Javadoc_TagDescriptionIndentation;
       case "SummaryJavadoc":
         switch (key) {
           case "summary.javaDoc":
           case "summary.javaDoc.missing":
-            return Type.JavaDoc_MissingSummary;
+            return Type.Javadoc_MissingSummary;
           case "summary.javaDoc.missing.period":
           case "summary.first.sentence":
-            return Type.JavaDoc_MissingPeriod;
+            return Type.Javadoc_MissingPeriod;
         }
         break;
       case "JavadocParagraph":
-        return Type.JavaDoc_Paragraph;
+        return Type.Javadoc_Paragraph;
       case "RequireEmptyLineBeforeBlockTagGroup":
-        return Type.JavaDoc_EmptyLine;
+        return Type.Javadoc_EmptyLine;
       case "AtclauseOrder":
-        return Type.JavaDoc_TagOrder;
+        return Type.Javadoc_TagOrder;
       case "JavadocMethod":
         switch (key) {
           case "javadoc.expectedTag":
           case "javadoc.return.expected":
-            return Type.JavaDoc_MissingTag;
+            return Type.Javadoc_MissingTag;
           case "javadoc.duplicateTag":
           case "javadoc.unusedTag":
           case "javadoc.unusedTagGeneral":
-            return Type.JavaDoc_ExtraTag;
+            return Type.Javadoc_ExtraTag;
         }
         break;
-      case "MissingJavadocMethod":
-      case "MissingJavadocType":
-        return Type.JavaDoc_Missing;
+
       case "MethodName":
         return Type.MethodNames_Regex;
       case "SingleLineJavadoc":
-        return Type.JavaDoc_SingleLine;
+        return Type.Javadoc_SingleLine;
       case "EmptyCatchBlock":
-        return Type.Useless_EmptyBlock;
+        return Type.EmptyCatchBlock;
       case "CommentsIndentation":
         return Type.Formatting_IndentationSize;
-      case "JavadocMissingLeadingAsterisk":
-        return Type.JavaDoc_Asterisk;
-      case "JavadocMissingWhitespaceAfterAsterisk":
-        return Type.JavaDoc_Padding;
 
       case "Naming":
         switch (key) {

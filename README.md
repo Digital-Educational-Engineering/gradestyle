@@ -29,6 +29,9 @@ You can find a copy of the paper in the [publications](publications) directory.
 > java -jar build/libs/GradeStyle-all.jar <properties-file>
 ```
 
+## Run Existing Jar
+There are 3 jars in the /jars folder, each for a different purpose. you can run any of these jars if you are interested in replication or ease of use. See the README file in the /jars folder for more info.
+
 ## Configuration
 
 ```properties
